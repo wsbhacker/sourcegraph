@@ -95,16 +95,15 @@ export class BlobPanel extends React.PureComponent<Props> {
             provider: registry
                 .getLocationsAndProviders(from(this.props.extensionsController.services.model.model), extraParams)
                 .pipe(
-                    map(
-                        ({ locations, hasProviders }) =>
-                            hasProviders && locations
-                                ? {
-                                      title,
-                                      content: '',
-                                      priority,
-                                      locationProvider: locations,
-                                  }
-                                : null
+                    map(({ locations, hasProviders }) =>
+                        hasProviders && locations
+                            ? {
+                                  title,
+                                  content: '',
+                                  priority,
+                                  locationProvider: locations,
+                              }
+                            : null
                     )
                 ),
         })
@@ -126,18 +125,6 @@ export class BlobPanel extends React.PureComponent<Props> {
                         {
                             context: { includeDeclaration: false },
                         }
-                    ),
-                    entryForViewProviderRegistration(
-                        'impl',
-                        'Implementation',
-                        160,
-                        this.props.extensionsController.services.textDocumentImplementation
-                    ),
-                    entryForViewProviderRegistration(
-                        'typedef',
-                        'Type definition',
-                        150,
-                        this.props.extensionsController.services.textDocumentTypeDefinition
                     ),
 
                     {
@@ -168,28 +155,27 @@ export class BlobPanel extends React.PureComponent<Props> {
                         // Code discussions view.
                         registrationOptions: { id: 'discussions', container: ContributableViewContainer.Panel },
                         provider: subjectChanges.pipe(
-                            map(
-                                (subject: PanelSubject) =>
-                                    isDiscussionsEnabled(this.props.settingsCascade)
-                                        ? {
-                                              title: 'Discussions',
-                                              content: '',
-                                              priority: 140,
-                                              locationProvider: null,
-                                              reactElement: (
-                                                  <DiscussionsTree
-                                                      repoID={this.props.repoID}
-                                                      repoName={subject.repoName}
-                                                      commitID={subject.commitID}
-                                                      rev={subject.rev}
-                                                      filePath={subject.filePath}
-                                                      history={this.props.history}
-                                                      location={this.props.location}
-                                                      authenticatedUser={this.props.authenticatedUser}
-                                                  />
-                                              ),
-                                          }
-                                        : null
+                            map((subject: PanelSubject) =>
+                                isDiscussionsEnabled(this.props.settingsCascade)
+                                    ? {
+                                          title: 'Discussions',
+                                          content: '',
+                                          priority: 140,
+                                          locationProvider: null,
+                                          reactElement: (
+                                              <DiscussionsTree
+                                                  repoID={this.props.repoID}
+                                                  repoName={subject.repoName}
+                                                  commitID={subject.commitID}
+                                                  rev={subject.rev}
+                                                  filePath={subject.filePath}
+                                                  history={this.props.history}
+                                                  location={this.props.location}
+                                                  authenticatedUser={this.props.authenticatedUser}
+                                              />
+                                          ),
+                                      }
+                                    : null
                             )
                         ),
                     },
