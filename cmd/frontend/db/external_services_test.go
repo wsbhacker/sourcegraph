@@ -14,6 +14,54 @@ func TestExternalServices_ValidateConfig(t *testing.T) {
 		err    string
 	}{
 		{
+			kind:   "AWSCODECOMMIT",
+			desc:   "without region, accessKeyID, secretAccessKey",
+			config: `{}`,
+			err:    `region: region is required; accessKeyID: accessKeyID is required; secretAccessKey: secretAccessKey is required; `,
+		},
+		{
+			kind:   "AWSCODECOMMIT",
+			desc:   "invalid region",
+			config: `{"region": "foo", "accessKeyID": "bar", "secretAccessKey": "baz"}`,
+			err:    `region: region must be one of the following: "ap-northeast-1", "ap-northeast-2", "ap-south-1", "ap-southeast-1", "ap-southeast-2", "ca-central-1", "eu-central-1", "eu-west-1", "eu-west-2", "eu-west-3", "sa-east-1", "us-east-1", "us-east-2", "us-west-1", "us-west-2"; `,
+		},
+		{
+			kind:   "AWSCODECOMMIT",
+			desc:   "valid",
+			config: `{"region": "eu-west-2", "accessKeyID": "bar", "secretAccessKey": "baz"}`,
+			err:    ``,
+		},
+		{
+			kind:   "BITBUCKETSERVER",
+			desc:   "without url",
+			config: `{}`,
+			err:    ``,
+		},
+		{
+			kind:   "PHABRICATOR",
+			desc:   "without repos nor token",
+			config: `{}`,
+			err:    `(root): Must validate at least one schema (anyOf); token: token is required; `,
+		},
+		{
+			kind:   "PHABRICATOR",
+			desc:   "with empty repos",
+			config: `{"repos": []}`,
+			err:    `repos: Array must have at least 1 items; `,
+		},
+		{
+			kind:   "PHABRICATOR",
+			desc:   "with repos",
+			config: `{"repos": [{"path": "gitolite/my/repo", "callsign": "MUX"}]}`,
+			err:    `<nil>`,
+		},
+		{
+			kind:   "PHABRICATOR",
+			desc:   "with token",
+			config: `{"token": "a given token"}`,
+			err:    `<nil>`,
+		},
+		{
 			kind:   "OTHER",
 			desc:   "without url nor repos array",
 			config: `{}`,

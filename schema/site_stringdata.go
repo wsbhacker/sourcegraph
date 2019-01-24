@@ -204,6 +204,10 @@ const SiteSchemaJSON = `{
     "PhabricatorConnection": {
       "type": "object",
       "additionalProperties": false,
+      "anyOf": [
+        {"required": ["token"]},
+        {"required": ["repos"]}
+      ],
       "properties": {
         "url": {
           "description": "URL of a Phabricator instance, such as https://phabricator.example.com",
@@ -217,6 +221,7 @@ const SiteSchemaJSON = `{
         "repos": {
           "description": "The list of repositories available on Phabricator.",
           "type": "array",
+          "minItems": 1,
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -384,6 +389,10 @@ const SiteSchemaJSON = `{
       "type": "object",
       "additionalProperties": false,
       "required": ["url"],
+      "oneOf": [
+        {"required": ["token"]},
+        {"required": ["username", "password"]}
+      ],
       "properties": {
         "url": {
           "description": "URL of a Bitbucket Server instance, such as https://bitbucket.example.com.",
@@ -463,6 +472,7 @@ const SiteSchemaJSON = `{
             "eu-central-1",
             "eu-west-1",
             "eu-west-2",
+            "eu-west-3",
             "sa-east-1",
             "us-east-1",
             "us-east-2",
@@ -558,7 +568,10 @@ const SiteSchemaJSON = `{
           "type": "array",
           "items": {
             "type": "string",
-            "format": "uri-reference",
+            "oneOf": [
+              {"format": "uri-reference"},
+              {"format": "uri"}
+            ],
             "examples": [
               "path/to/my/repo",
               "path/to/my/repo.git/"

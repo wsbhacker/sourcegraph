@@ -4,27 +4,47 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/keegancsmith/sqlf"
 	"github.com/lib/pq"
+	"github.com/pkg/errors"
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/types"
 	"github.com/sourcegraph/sourcegraph/pkg/db/dbconn"
 	"github.com/sourcegraph/sourcegraph/pkg/db/dbutil"
 	"github.com/sourcegraph/sourcegraph/pkg/jsonc"
 	"github.com/sourcegraph/sourcegraph/pkg/legacyconf"
 	"github.com/sourcegraph/sourcegraph/schema"
+	"github.com/xeipuuv/gojsonschema"
 	log15 "gopkg.in/inconshreveable/log15.v2"
 )
 
 type externalServices struct {
 	GitHubValidators []func(cfg *schema.GitHubConnection) error
 	GitLabValidators []func(cfg *schema.GitLabConnection) error
+}
+
+// ExternalServiceKinds contains a map of all supported kinds of
+// external services.
+var ExternalServiceKinds = map[string]ExternalServiceKind{
+	"AWSCODECOMMIT":   {CodeHost: true, Definition: "AWSCodeCommitConnection"},
+	"BITBUCKETSERVER": {CodeHost: true, Definition: "BitbucketServerConnection"},
+	"GITHUB":          {CodeHost: true, Definition: "GitHubConnection"},
+	"GITLAB":          {CodeHost: true, Definition: "GitLabConnection"},
+	"GITOLITE":        {CodeHost: true, Definition: "GitoliteConnection"},
+	"PHABRICATOR":     {CodeHost: true, Definition: "PhabricatorConnection"},
+	"OTHER":           {CodeHost: true, Definition: "OtherExternalServiceConnection"},
+}
+
+// ExternalServiceKind describes a kind of external service.
+type ExternalServiceKind struct {
+	// True if the external service can host repositories.
+	CodeHost bool
+	// JSON Schema definition name in site.schema.json
+	Definition string
 }
 
 // ExternalServicesListOptions contains options for listing external services.
@@ -45,30 +65,57 @@ func (o ExternalServicesListOptions) sqlConditions() []*sqlf.Query {
 	return conds
 }
 
+type jsonSchemaValidationError []gojsonschema.ResultError
+
+func (es jsonSchemaValidationError) Error() string {
+	var sb strings.Builder
+	for _, e := range es {
+		sb.WriteString(e.String() + "; ")
+	}
+	return sb.String()
+}
+
 func (c *externalServices) validateConfig(kind, config string) error {
+	ext, ok := ExternalServiceKinds[kind]
+	if !ok {
+		return fmt.Errorf("invalid external service kind: %s", kind)
+	}
+
 	// All configs must be valid JSON.
 	// If this requirement is ever changed, you will need to update
 	// serveExternalServiceConfigs to handle this case.
 
+	sl := gojsonschema.NewSchemaLoader()
+	err := sl.AddSchemas(gojsonschema.NewStringLoader(schema.SiteSchemaJSON))
+	if err != nil {
+		return errors.Wrap(err, "failed to add site schema to schema loader")
+	}
+
+	sc, err := sl.Compile(gojsonschema.NewStringLoader(
+		fmt.Sprintf(`{"$ref": "site.schema.json#/definitions/%s"}`, ext.Definition),
+	))
+
+	if err != nil {
+		return errors.Wrapf(err, "failed to compile schema for external service of kind %q", kind)
+	}
+
+	normalized, err := jsonc.Parse(config)
+	if err != nil {
+		return errors.Wrapf(err, "failed to normalize JSON")
+	}
+
+	sc.SetRootSchemaName(ext.Definition)
+	res, err := sc.Validate(gojsonschema.NewBytesLoader(normalized))
+	if err != nil {
+		return errors.Wrap(err, "failed to validate config against schema")
+	}
+
+	if errs := res.Errors(); len(errs) > 0 {
+		return jsonSchemaValidationError(errs)
+	}
+
+	// Extra validation not based on JSON Schema.
 	switch kind {
-	case "PHABRICATOR":
-		var cfg schema.PhabricatorConnection
-		if err := jsonc.Unmarshal(config, &cfg); err != nil {
-			return err
-		}
-		if len(cfg.Repos) == 0 && cfg.Token == "" {
-			return errors.New(`Either "token" or "repos" must be set`)
-		}
-	case "BITBUCKETSERVER":
-		var cfg schema.BitbucketServerConnection
-		if err := jsonc.Unmarshal(config, &cfg); err != nil {
-			return err
-		}
-		if cfg.Token != "" && cfg.Password != "" {
-			return errors.New("Specify either a token or a username/password, but not both")
-		} else if cfg.Token == "" && cfg.Username == "" && cfg.Password == "" {
-			return errors.New("Specify either a token or a username/password to authenticate")
-		}
 	case "GITHUB":
 		var cfg schema.GitHubConnection
 		if err := jsonc.Unmarshal(config, &cfg); err != nil {
@@ -85,60 +132,11 @@ func (c *externalServices) validateConfig(kind, config string) error {
 		if err := jsonc.Unmarshal(config, &cfg); err != nil {
 			return err
 		}
-		if strings.Contains(cfg.Url, "example.com") {
-			return fmt.Errorf(`invalid GitLab URL detected: %s (did you forget to remove "example.com"?)`, cfg.Url)
-		}
 
 		for _, validate := range c.GitLabValidators {
 			if err := validate(&cfg); err != nil {
 				return err
 			}
-		}
-	case "OTHER":
-		return validateOtherExternalServiceConfig(config)
-
-	default:
-		if _, err := jsonc.Parse(config); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func validateOtherExternalServiceConfig(config string) error {
-	var cfg schema.OtherExternalServiceConnection
-	if err := jsonc.Unmarshal(config, &cfg); err != nil {
-		return err
-	}
-
-	if len(cfg.Repos) == 0 {
-		return errors.New(`required "repos" property is empty`)
-	}
-
-	parseRepo := url.Parse
-	if cfg.Url != "" {
-		baseURL, err := url.Parse(cfg.Url)
-		if err != nil {
-			return fmt.Errorf(`failed to parse "url": %q`, err)
-		}
-		parseRepo = baseURL.Parse
-	}
-
-	for i, repo := range cfg.Repos {
-		if repo == "" {
-			return fmt.Errorf(`invalid empty repos[%d]`, i)
-		}
-
-		cloneURL, err := parseRepo(repo)
-		if err != nil {
-			return fmt.Errorf(`failed to parse repos[%d]=%q with url=%q: %s`, i, repo, cfg.Url, err)
-		}
-
-		switch cloneURL.Scheme {
-		case "git", "http", "https", "ssh":
-			continue
-		default:
-			return fmt.Errorf("failed to parse repos[%d]=%q with url=%q. scheme %q not one of git, http, https or ssh", i, repo, cfg.Url, cloneURL.Scheme)
 		}
 	}
 
