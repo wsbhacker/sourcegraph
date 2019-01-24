@@ -13,10 +13,18 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+type Visibility string
+
+const (
+	Public   Visibility = "public"
+	Private             = "private"
+	Internal            = "internal"
+)
+
 // Project is a GitLab project (equivalent to a GitHub repository).
 type Project struct {
 	ProjectCommon
-	Visibility        string         `json:"visibility"`                    // "private", "internal", or "public"
+	Visibility        Visibility     `json:"visibility"`                    // "private", "internal", or "public"
 	ForkedFromProject *ProjectCommon `json:"forked_from_project,omitempty"` // If non-nil, the project from which this project was forked
 	Archived          bool           `json:"archived"`
 }
